@@ -24,7 +24,22 @@ function Login {
 }
 
 Write-Host "Checking health..."
-$health = Invoke-RestMethod -Uri "$Api/health"
+try {
+    $health = Invoke-RestMethod -Uri "$Api/health"
+}
+catch {
+    try {
+        $legacyHealth = Invoke-RestMethod -Uri "$BaseUrl/health"
+    }
+    catch {
+        throw "Backend tidak dapat diakses melalui $BaseUrl/health maupun $Api/health."
+    }
+
+    if ($legacyHealth.status -eq "ok") {
+        throw "Backend hidup, tetapi /api/health belum tersedia. Railway masih menjalankan versi lama. Commit dan push perubahan lokal ke branch yang dideploy, lalu redeploy sebelum menjalankan smoke test."
+    }
+    throw
+}
 Assert-True ($health.status -eq "ok") "API health failed"
 Assert-True ($health.database -eq "connected") "Database is not connected"
 
