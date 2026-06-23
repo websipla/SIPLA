@@ -11,7 +11,10 @@ import (
 
 func GetProvinces(c *gin.Context) {
 	var list []models.Province
-	config.DB.Order("name").Find(&list)
+	if err := config.DB.Order("name").Find(&list).Error; err != nil {
+		respondDBError(c, "province_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
@@ -22,7 +25,10 @@ func GetRegencies(c *gin.Context) {
 	if provinceID != "" {
 		query = query.Where("province_id = ?", provinceID)
 	}
-	query.Find(&list)
+	if err := query.Find(&list).Error; err != nil {
+		respondDBError(c, "regency_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
@@ -33,7 +39,10 @@ func GetDistricts(c *gin.Context) {
 	if regencyID != "" {
 		query = query.Where("regency_id = ?", regencyID)
 	}
-	query.Find(&list)
+	if err := query.Find(&list).Error; err != nil {
+		respondDBError(c, "district_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
@@ -44,6 +53,9 @@ func GetVillages(c *gin.Context) {
 	if districtID != "" {
 		query = query.Where("district_id = ?", districtID)
 	}
-	query.Find(&list)
+	if err := query.Find(&list).Error; err != nil {
+		respondDBError(c, "village_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }

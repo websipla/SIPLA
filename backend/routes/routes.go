@@ -10,6 +10,7 @@ func SetupRoutes(r *gin.Engine) {
 	api := r.Group("/api")
 
 	// Public
+	api.GET("/health", controllers.Health)
 	api.POST("/auth/login", controllers.Login)
 	api.POST("/auth/register", controllers.Register)
 	api.GET("/provinces", controllers.GetProvinces)
@@ -45,6 +46,7 @@ func SetupRoutes(r *gin.Engine) {
 		admin.Use(middleware.AdminOnly())
 		{
 			admin.GET("/dashboard", controllers.GetDashboard)
+			admin.GET("/debug/counts", controllers.DebugCounts)
 			admin.POST("/tanggapan", controllers.CreateTanggapan)
 			admin.PUT("/tanggapan/:id", controllers.UpdateTanggapan)
 			admin.DELETE("/tanggapan/:id", controllers.DeleteTanggapan)
@@ -64,6 +66,13 @@ func SetupRoutes(r *gin.Engine) {
 			admin.GET("/lupa-password/count", controllers.GetJumlahNotifReset)
 			admin.PUT("/lupa-password/:id/baca", controllers.TandaiBaca)
 			admin.PUT("/lupa-password/:id/selesai", controllers.SelesaikanPermintaanReset)
+		}
+
+		adminMaster := protected.Group("/")
+		adminMaster.Use(middleware.AdminRoleOnly())
+		{
+			adminMaster.POST("/jenis-layanan", controllers.CreateJenisLayanan)
+			adminMaster.PUT("/jenis-layanan/:id", controllers.UpdateJenisLayanan)
 		}
 	}
 }

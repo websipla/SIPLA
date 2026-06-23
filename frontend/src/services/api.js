@@ -9,6 +9,12 @@ export const getAssetUrl = (path) => {
   return `${API_ORIGIN}/${path.replace(/^\/+/, '')}`
 }
 
+export const getApiError = (error, fallback = 'Permintaan gagal diproses') =>
+  error?.response?.data?.error ||
+  error?.response?.data?.message ||
+  (error?.request ? 'Server tidak dapat dihubungi. Periksa koneksi dan URL API.' : error?.message) ||
+  fallback
+
 const api = axios.create({ baseURL: API_URL })
 
 api.interceptors.request.use((config) => {
@@ -20,7 +26,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    const hasToken = Boolean(localStorage.getItem('token'))
+    const isLoginRequest = err.config?.url?.includes('/auth/login')
+    if (err.response?.status === 401 && hasToken && !isLoginRequest) {
       localStorage.clear()
       window.location.href = '/login'
     }

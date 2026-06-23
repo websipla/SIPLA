@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -44,8 +45,17 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("user_id", claims.ID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
+		log.Printf("authenticated_request method=%s path=%s user_id=%s role=%s",
+			c.Request.Method, c.FullPath(), maskIdentifier(claims.ID), claims.Role)
 		c.Next()
 	}
+}
+
+func maskIdentifier(value string) string {
+	if len(value) <= 4 {
+		return value
+	}
+	return strings.Repeat("*", len(value)-4) + value[len(value)-4:]
 }
 
 func AdminOnly() gin.HandlerFunc {
@@ -53,6 +63,17 @@ func AdminOnly() gin.HandlerFunc {
 		role, _ := c.Get("role")
 		if role != "admin" && role != "petugas" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Akses ditolak"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func AdminRoleOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetString("role") != "admin" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Hanya administrator yang dapat melakukan tindakan ini"})
 			c.Abort()
 			return
 		}

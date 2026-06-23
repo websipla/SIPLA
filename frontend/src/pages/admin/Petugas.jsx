@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import api from '../../services/api'
+import api, { getApiError } from '../../services/api'
 import AdminLayout from '../../components/AdminLayout'
 import { useAuth } from '../../context/AuthContext'
 
@@ -20,7 +20,9 @@ export default function AdminPetugas() {
   const [resetLoading, setResetLoading]       = useState(false)
   const [resetMsg, setResetMsg]               = useState(null)
 
-  const fetchData = () => api.get('/petugas').then(r => setList(r.data.data || []))
+  const fetchData = () => api.get('/petugas')
+    .then(r => setList(r.data.data || []))
+    .catch(err => setFormMsg({ type: 'error', text: getApiError(err, 'Gagal memuat petugas') }))
   useEffect(() => { fetchData() }, [])
 
   const handleCreate = async (e) => {
@@ -28,13 +30,13 @@ export default function AdminPetugas() {
     setFormMsg(null)
     setFormLoading(true)
     try {
-      await api.post('/petugas', form)
+      const res = await api.post('/petugas', form)
       setShowForm(false)
       setForm(EMPTY_FORM)
-      setFormMsg({ type: 'success', text: `Petugas "${form.nama_petugas}" berhasil ditambahkan` })
-      fetchData()
+      setFormMsg({ type: 'success', text: res.data.message || `Petugas "${form.nama_petugas}" berhasil ditambahkan` })
+      await fetchData()
     } catch (err) {
-      setFormMsg({ type: 'error', text: err.response?.data?.error || 'Gagal menambah petugas' })
+      setFormMsg({ type: 'error', text: getApiError(err, 'Gagal menambah petugas') })
     } finally {
       setFormLoading(false)
     }
@@ -43,10 +45,11 @@ export default function AdminPetugas() {
   const handleDelete = async (p) => {
     if (!confirm(`Hapus petugas "${p.nama_petugas}" (${p.username})? Tindakan ini tidak dapat dibatalkan.`)) return
     try {
-      await api.delete(`/petugas/${p.id_petugas}`)
-      fetchData()
+      const res = await api.delete(`/petugas/${p.id_petugas}`)
+      await fetchData()
+      setFormMsg({ type: 'success', text: res.data.message || 'Petugas berhasil dihapus' })
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal menghapus petugas')
+      setFormMsg({ type: 'error', text: getApiError(err, 'Gagal menghapus petugas') })
     }
   }
 
@@ -70,7 +73,7 @@ export default function AdminPetugas() {
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
-      setResetMsg({ type: 'error', text: err.response?.data?.error || 'Gagal mereset password' })
+      setResetMsg({ type: 'error', text: getApiError(err, 'Gagal mereset password') })
     } finally {
       setResetLoading(false)
     }

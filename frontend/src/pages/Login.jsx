@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import api from '../services/api'
+import api, { getApiError } from '../services/api'
 
 export default function Login() {
   const { login } = useAuth()
   const navigate  = useNavigate()
+  const location = useLocation()
 
   const [form, setForm]     = useState({ username: '', password: '', role: 'masyarakat' })
   const [error, setError]   = useState('')
@@ -28,7 +29,7 @@ export default function Login() {
       if (data.role === 'admin' || data.role === 'petugas') navigate('/admin/dashboard')
       else navigate('/user/aspirasi')
     } catch (err) {
-      setError(err.response?.data?.error || 'Username atau password salah')
+      setError(getApiError(err, 'Username atau password salah'))
     } finally {
       setLoading(false)
     }
@@ -42,7 +43,7 @@ export default function Login() {
       await api.post('/public/lupa-password', lupaForm)
       setLupaStep('success')
     } catch (err) {
-      setLupaError(err.response?.data?.error || 'Gagal mengirim permintaan')
+      setLupaError(getApiError(err, 'Gagal mengirim permintaan'))
     } finally {
       setLupaLoading(false)
     }
@@ -97,6 +98,11 @@ export default function Login() {
           <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
             <h2 className="text-2xl font-bold text-gray-800 mb-1">Selamat Datang</h2>
             <p className="text-gray-400 text-sm mb-6">Masuk ke akun Anda untuk melanjutkan</p>
+            {location.state?.success && (
+              <div className="bg-green-50 border border-green-200 text-green-700 rounded-xl px-4 py-3 text-sm mb-4">
+                {location.state.success}
+              </div>
+            )}
 
             {/* Toggle Role */}
             <div className="flex bg-gray-100 rounded-xl p-1 mb-6">

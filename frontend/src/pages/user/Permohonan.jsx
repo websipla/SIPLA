@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import api, { getAssetUrl } from '../../services/api'
+import api, { getApiError, getAssetUrl } from '../../services/api'
 import UserLayout from '../../components/UserLayout'
 
 const STATUS = {
@@ -47,12 +47,17 @@ export default function UserPermohonan() {
   const [selectedJenis, setSelectedJenis] = useState(null)
   const [form, setForm]                   = useState(EMPTY_FORM)
   const [loading, setLoading]             = useState(false)
+  const [feedback, setFeedback]           = useState(null)
 
-  const fetchData = () => api.get('/permohonan').then(r => setList(r.data.data || []))
+  const fetchData = () => api.get('/permohonan')
+    .then(r => setList(r.data.data || []))
+    .catch(err => setFeedback({ type: 'error', text: getApiError(err, 'Gagal memuat permohonan') }))
 
   useEffect(() => {
     fetchData()
-    api.get('/jenis-layanan').then(r => setJenisLayanan(r.data.data || []))
+    api.get('/jenis-layanan')
+      .then(r => setJenisLayanan(r.data.data || []))
+      .catch(err => setFeedback({ type: 'error', text: getApiError(err, 'Gagal memuat jenis layanan') }))
   }, [])
 
   const handleOpenForm = () => {
@@ -78,15 +83,17 @@ export default function UserPermohonan() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setFeedback(null)
     setLoading(true)
     try {
       const fd = new FormData()
       Object.entries(form).forEach(([k, v]) => { if (v) fd.append(k, v) })
-      await api.post('/permohonan', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      const res = await api.post('/permohonan', fd)
       handleCloseForm()
-      fetchData()
+      await fetchData()
+      setFeedback({ type: 'success', text: res.data.message || 'Permohonan berhasil disimpan' })
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal mengirim permohonan')
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal mengirim permohonan') })
     } finally {
       setLoading(false)
     }
@@ -94,8 +101,13 @@ export default function UserPermohonan() {
 
   const handleDelete = async (id) => {
     if (!confirm('Batalkan permohonan ini?')) return
-    await api.delete(`/permohonan/${id}`)
-    fetchData()
+    try {
+      const res = await api.delete(`/permohonan/${id}`)
+      await fetchData()
+      setFeedback({ type: 'success', text: res.data.message || 'Permohonan berhasil dibatalkan' })
+    } catch (err) {
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal membatalkan permohonan') })
+    }
   }
 
   const fileFields = getFileFields(selectedJenis?.nama_layanan)
@@ -103,6 +115,13 @@ export default function UserPermohonan() {
   return (
     <UserLayout>
       <div className="space-y-5">
+        {feedback && (
+          <div className={`rounded-xl px-4 py-3 text-sm border ${
+            feedback.type === 'success'
+              ? 'bg-green-50 border-green-200 text-green-700'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>{feedback.text}</div>
+        )}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-800">Permohonan Layanan</h1>

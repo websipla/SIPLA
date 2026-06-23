@@ -1,18 +1,24 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 	"pengaduan/config"
 	"pengaduan/models"
 )
 
 func GetJenisLayanan(c *gin.Context) {
 	var list []models.JenisLayanan
-	config.DB.Where("is_active = ?", true).Find(&list)
+	if err := config.DB.Where("is_active = ?", true).Order("nama_layanan").Find(&list).Error; err != nil {
+		respondDBError(c, "jenis_layanan_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
@@ -27,7 +33,10 @@ func GetPermohonan(c *gin.Context) {
 	if status := c.Query("status"); status != "" {
 		query = query.Where("status = ?", status)
 	}
-	query.Find(&list)
+	if err := query.Find(&list).Error; err != nil {
+		respondDBError(c, "permohonan_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
@@ -35,6 +44,10 @@ func GetPermohonanByID(c *gin.Context) {
 	id := c.Param("id")
 	var p models.Permohonan
 	if err := config.DB.Preload("Masyarakat").Preload("JenisLayanan").Preload("Petugas").First(&p, id).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			respondDBError(c, "permohonan_detail", err)
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "Permohonan tidak ditemukan"})
 		return
 	}
@@ -48,9 +61,13 @@ func GetPermohonanByID(c *gin.Context) {
 }
 
 func CreatePermohonan(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	idJenis := c.PostForm("id_jenis_layanan")
-	keterangan := c.PostForm("keterangan")
+	if c.GetString("role") != "masyarakat" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Hanya masyarakat yang dapat membuat permohonan"})
+		return
+	}
+	userID := c.GetString("user_id")
+	idJenis := trim(c.PostForm("id_jenis_layanan"))
+	keterangan := trim(c.PostForm("keterangan"))
 	if idJenis == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Jenis layanan wajib dipilih"})
 		return
@@ -58,6 +75,24 @@ func CreatePermohonan(c *gin.Context) {
 	jenisID, err := strconv.ParseUint(idJenis, 10, 64)
 	if err != nil || jenisID == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Jenis layanan tidak valid"})
+		return
+	}
+	var jenis models.JenisLayanan
+	if err := config.DB.Where("id = ? AND is_active = ?", jenisID, true).First(&jenis).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Jenis layanan tidak ditemukan atau sudah tidak aktif"})
+			return
+		}
+		respondDBError(c, "permohonan_validate_jenis", err)
+		return
+	}
+	if !requireFormFile(c, "file_ktp", "KTP") ||
+		!requireFormFile(c, "file_kk", "Kartu Keluarga") ||
+		!requireFormFile(c, "file_surat_rtrw", "Surat pengantar RT/RW") {
+		return
+	}
+	if strings.Contains(strings.ToLower(jenis.NamaLayanan), "tidak mampu") &&
+		!requireFormFile(c, "file_foto_rumah", "Foto rumah") {
 		return
 	}
 
@@ -89,16 +124,17 @@ func CreatePermohonan(c *gin.Context) {
 
 	now := time.Now()
 	p := models.Permohonan{
-		NIK: userID.(string), IDJenisLayanan: jenisID, TglPermohonan: now,
+		NIK: userID, IDJenisLayanan: jenisID, TglPermohonan: now,
 		Keterangan: keterangan, FileKTP: fileKTP, FileKK: fileKK,
 		FileSuratRTRW: fileSuratRTRW, FileFotoRumah: fileFotoRumah,
 		FilePendukung: filePendukung,
 		Status:        "verifikasi_persyaratan", CreatedAt: &now, UpdatedAt: &now,
 	}
 	if err := config.DB.Create(&p).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membuat permohonan"})
+		respondDBError(c, "permohonan_create", err)
 		return
 	}
+	logAction(c, "permohonan_create_success", "id", p.ID, "id_jenis_layanan", jenisID, "status", p.Status)
 	c.JSON(http.StatusCreated, gin.H{"message": "Permohonan berhasil diajukan", "data": p})
 }
 
@@ -106,12 +142,20 @@ func UpdatePermohonan(c *gin.Context) {
 	id := c.Param("id")
 	var p models.Permohonan
 	if err := config.DB.First(&p, id).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			respondDBError(c, "permohonan_update_lookup", err)
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "Permohonan tidak ditemukan"})
 		return
 	}
 	status := c.PostForm("status")
 	catatan := c.PostForm("catatan_petugas")
 	if status != "" {
+		if !validPermohonanStatus(status) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Status permohonan tidak valid"})
+			return
+		}
 		p.Status = status
 	}
 	if catatan != "" {
@@ -136,28 +180,50 @@ func UpdatePermohonan(c *gin.Context) {
 	}
 	now := time.Now()
 	p.UpdatedAt = &now
-	config.DB.Save(&p)
+	if err := config.DB.Save(&p).Error; err != nil {
+		respondDBError(c, "permohonan_update", err)
+		return
+	}
+	logAction(c, "permohonan_update_success", "id", p.ID, "status", p.Status)
 	c.JSON(http.StatusOK, gin.H{"message": "Permohonan diperbarui", "data": p})
 }
 
 func DeletePermohonan(c *gin.Context) {
 	id := c.Param("id")
+	role := c.GetString("role")
+	userID := c.GetString("user_id")
 	var p models.Permohonan
 	if err := config.DB.First(&p, id).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			respondDBError(c, "permohonan_delete_lookup", err)
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "Permohonan tidak ditemukan"})
+		return
+	}
+	if role == "masyarakat" && p.NIK != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Akses ditolak"})
 		return
 	}
 	if p.Status != "verifikasi_persyaratan" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Permohonan yang sudah diproses tidak dapat dihapus"})
 		return
 	}
-	config.DB.Delete(&p)
+	if err := config.DB.Delete(&p).Error; err != nil {
+		respondDBError(c, "permohonan_delete", err)
+		return
+	}
+	logAction(c, "permohonan_delete_success", "id", p.ID)
 	c.JSON(http.StatusOK, gin.H{"message": "Permohonan dihapus"})
 }
 
 func GetKelurahanInfo(c *gin.Context) {
 	var info models.KelurahanInfo
 	if err := config.DB.First(&info).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			respondDBError(c, "kelurahan_detail", err)
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "Data kelurahan belum tersedia"})
 		return
 	}
@@ -168,6 +234,10 @@ func UpdateKelurahanInfo(c *gin.Context) {
 	// Ambil data existing dulu
 	var info models.KelurahanInfo
 	if err := config.DB.First(&info).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			respondDBError(c, "kelurahan_update_lookup", err)
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "Data kelurahan tidak ditemukan"})
 		return
 	}
@@ -175,7 +245,15 @@ func UpdateKelurahanInfo(c *gin.Context) {
 	// Bind request ke struct sementara
 	var req models.KelurahanInfo
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format data kelurahan tidak valid"})
+		return
+	}
+	if req.JumlahPenduduk < 0 || req.JumlahKK < 0 || req.JumlahLakiLaki < 0 ||
+		req.JumlahPerempuan < 0 || req.JmlPaudKbTk < 0 || req.JmlSekolahDasar < 0 ||
+		req.JmlSltp < 0 || req.JmlSlta < 0 || req.JmlPerguruanTinggi < 0 ||
+		req.JmlRumahSakit < 0 || req.JmlPuskesmas < 0 || req.JmlKlinik < 0 ||
+		req.JmlKlinikTradisional < 0 || req.JmlPosyandu < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nilai statistik kelurahan tidak boleh negatif"})
 		return
 	}
 
@@ -210,11 +288,88 @@ func UpdateKelurahanInfo(c *gin.Context) {
 	info.UpdatedAt = &now
 
 	if err := config.DB.Save(&info).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan data kelurahan"})
+		respondDBError(c, "kelurahan_update", err)
 		return
 	}
-
+	logAction(c, "kelurahan_update_success", "id", info.ID)
 	c.JSON(http.StatusOK, gin.H{"message": "Info kelurahan berhasil diperbarui", "data": info})
+}
+
+func CreateJenisLayanan(c *gin.Context) {
+	var req struct {
+		NamaLayanan  string `json:"nama_layanan" binding:"required"`
+		Deskripsi    string `json:"deskripsi"`
+		Syarat       string `json:"syarat"`
+		EstimasiHari int    `json:"estimasi_hari"`
+		IsActive     *bool  `json:"is_active"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nama layanan wajib diisi"})
+		return
+	}
+	req.NamaLayanan = trim(req.NamaLayanan)
+	if req.NamaLayanan == "" || req.EstimasiHari < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nama layanan wajib diisi dan estimasi hari tidak boleh negatif"})
+		return
+	}
+	active := true
+	if req.IsActive != nil {
+		active = *req.IsActive
+	}
+	now := time.Now()
+	layanan := models.JenisLayanan{
+		NamaLayanan: req.NamaLayanan, Deskripsi: trim(req.Deskripsi), Syarat: trim(req.Syarat),
+		EstimasiHari: req.EstimasiHari, IsActive: active, CreatedAt: &now, UpdatedAt: &now,
+	}
+	if err := config.DB.Create(&layanan).Error; err != nil {
+		respondDBError(c, "jenis_layanan_create", err)
+		return
+	}
+	logAction(c, "jenis_layanan_create_success", "id", layanan.ID, "nama", layanan.NamaLayanan)
+	c.JSON(http.StatusCreated, gin.H{"message": "Jenis layanan berhasil ditambahkan", "data": layanan})
+}
+
+func UpdateJenisLayanan(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID jenis layanan tidak valid"})
+		return
+	}
+	var layanan models.JenisLayanan
+	if err := config.DB.First(&layanan, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Jenis layanan tidak ditemukan"})
+			return
+		}
+		respondDBError(c, "jenis_layanan_update_lookup", err)
+		return
+	}
+	var req struct {
+		NamaLayanan  string `json:"nama_layanan" binding:"required"`
+		Deskripsi    string `json:"deskripsi"`
+		Syarat       string `json:"syarat"`
+		EstimasiHari int    `json:"estimasi_hari"`
+		IsActive     *bool  `json:"is_active"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || trim(req.NamaLayanan) == "" || req.EstimasiHari < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Data jenis layanan tidak valid"})
+		return
+	}
+	layanan.NamaLayanan = trim(req.NamaLayanan)
+	layanan.Deskripsi = trim(req.Deskripsi)
+	layanan.Syarat = trim(req.Syarat)
+	layanan.EstimasiHari = req.EstimasiHari
+	if req.IsActive != nil {
+		layanan.IsActive = *req.IsActive
+	}
+	now := time.Now()
+	layanan.UpdatedAt = &now
+	if err := config.DB.Save(&layanan).Error; err != nil {
+		respondDBError(c, "jenis_layanan_update", err)
+		return
+	}
+	logAction(c, "jenis_layanan_update_success", "id", layanan.ID, "aktif", layanan.IsActive)
+	c.JSON(http.StatusOK, gin.H{"message": "Jenis layanan berhasil diperbarui", "data": layanan})
 }
 
 // PUT /api/permohonan/:id/proses — admin/petugas update status + upload hasil
@@ -235,6 +390,10 @@ func ProsesPermohonan(c *gin.Context) {
 	}
 
 	if status := c.PostForm("status"); status != "" {
+		if !validPermohonanStatus(status) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Status permohonan tidak valid"})
+			return
+		}
 		p.Status = status
 	}
 	if catatan := c.PostForm("catatan_petugas"); catatan != "" {
@@ -258,25 +417,47 @@ func ProsesPermohonan(c *gin.Context) {
 	}
 
 	if err := config.DB.Save(&p).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan permohonan"})
+		respondDBError(c, "permohonan_process", err)
 		return
 	}
 
-	config.DB.Preload("Masyarakat").Preload("JenisLayanan").Preload("Petugas").First(&p, p.ID)
+	if err := config.DB.Preload("Masyarakat").Preload("JenisLayanan").Preload("Petugas").First(&p, p.ID).Error; err != nil {
+		respondDBError(c, "permohonan_process_reload", err)
+		return
+	}
+	logAction(c, "permohonan_process_success", "id", p.ID, "status", p.Status, "id_petugas", petugas.IDPetugas)
 	c.JSON(http.StatusOK, gin.H{"message": "Permohonan berhasil diperbarui", "data": p})
 }
 
 // GET /api/public/statistik — tanpa auth, untuk landing page
 func GetStatistikPublik(c *gin.Context) {
 	var totalAsp, prosesAsp, selesaiAsp int64
-	config.DB.Model(&models.Pengaduan{}).Count(&totalAsp)
-	config.DB.Model(&models.Pengaduan{}).Where("status NOT IN ('selesai','ditolak')").Count(&prosesAsp)
-	config.DB.Model(&models.Pengaduan{}).Where("status = 'selesai'").Count(&selesaiAsp)
+	if err := config.DB.Model(&models.Pengaduan{}).Count(&totalAsp).Error; err != nil {
+		respondDBError(c, "public_stats_total_aspirasi", err)
+		return
+	}
+	if err := config.DB.Model(&models.Pengaduan{}).Where("status NOT IN ('selesai','ditolak')").Count(&prosesAsp).Error; err != nil {
+		respondDBError(c, "public_stats_process_aspirasi", err)
+		return
+	}
+	if err := config.DB.Model(&models.Pengaduan{}).Where("status = 'selesai'").Count(&selesaiAsp).Error; err != nil {
+		respondDBError(c, "public_stats_done_aspirasi", err)
+		return
+	}
 
 	var totalPer, prosesPer, selesaiPer int64
-	config.DB.Model(&models.Permohonan{}).Count(&totalPer)
-	config.DB.Model(&models.Permohonan{}).Where("status NOT IN ('selesai','ditolak')").Count(&prosesPer)
-	config.DB.Model(&models.Permohonan{}).Where("status = 'selesai'").Count(&selesaiPer)
+	if err := config.DB.Model(&models.Permohonan{}).Count(&totalPer).Error; err != nil {
+		respondDBError(c, "public_stats_total_permohonan", err)
+		return
+	}
+	if err := config.DB.Model(&models.Permohonan{}).Where("status NOT IN ('selesai','ditolak')").Count(&prosesPer).Error; err != nil {
+		respondDBError(c, "public_stats_process_permohonan", err)
+		return
+	}
+	if err := config.DB.Model(&models.Permohonan{}).Where("status = 'selesai'").Count(&selesaiPer).Error; err != nil {
+		respondDBError(c, "public_stats_done_permohonan", err)
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"aspirasi": gin.H{

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import api from '../../services/api'
+import api, { getApiError } from '../../services/api'
 import AdminLayout from '../../components/AdminLayout'
 
 export default function AdminMasyarakat() {
@@ -12,9 +12,12 @@ export default function AdminMasyarakat() {
   const [showPass, setShowPass] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
   const [resetMsg, setResetMsg] = useState(null) // { type: 'success'|'error', text }
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    api.get('/masyarakat').then(r => setList(r.data.data || []))
+    api.get('/masyarakat')
+      .then(r => setList(r.data.data || []))
+      .catch(err => setLoadError(getApiError(err, 'Gagal memuat data masyarakat')))
   }, [])
 
   const filtered = list.filter(m =>
@@ -56,7 +59,7 @@ export default function AdminMasyarakat() {
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
-      setResetMsg({ type: 'error', text: err.response?.data?.error || 'Gagal mereset password' })
+      setResetMsg({ type: 'error', text: getApiError(err, 'Gagal mereset password') })
     } finally {
       setResetLoading(false)
     }
@@ -114,6 +117,11 @@ export default function AdminMasyarakat() {
   return (
     <AdminLayout>
       <div className="space-y-5">
+        {loadError && (
+          <div className="rounded-xl px-4 py-3 text-sm bg-red-50 border border-red-200 text-red-700">
+            {loadError}
+          </div>
+        )}
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">

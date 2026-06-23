@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polygon, Marker, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-import api, { getAssetUrl } from '../../services/api'
+import api, { getApiError, getAssetUrl } from '../../services/api'
 import UserLayout from '../../components/UserLayout'
 
 delete L.Icon.Default.prototype._getIconUrl
@@ -74,8 +74,11 @@ export default function UserAspirasi() {
   const [selected, setSelected] = useState(null)
   const [form, setForm]         = useState(EMPTY_FORM)
   const [loading, setLoading]   = useState(false)
+  const [feedback, setFeedback] = useState(null)
 
-  const fetchData = () => api.get('/aspirasi').then(r => setList(r.data.data || []))
+  const fetchData = () => api.get('/aspirasi')
+    .then(r => setList(r.data.data || []))
+    .catch(err => setFeedback({ type: 'error', text: getApiError(err, 'Gagal memuat aspirasi') }))
   useEffect(() => { fetchData() }, [])
 
   const handleOpenForm = () => {
@@ -101,17 +104,19 @@ export default function UserAspirasi() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setFeedback(null)
     setLoading(true)
     try {
       const fd = new FormData()
       Object.entries(form).forEach(([k, v]) => {
         if (v !== null && v !== '') fd.append(k, v)
       })
-      await api.post('/aspirasi', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      const res = await api.post('/aspirasi', fd)
       handleCloseForm()
-      fetchData()
+      await fetchData()
+      setFeedback({ type: 'success', text: res.data.message || 'Aspirasi berhasil disimpan' })
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal mengirim aspirasi')
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal mengirim aspirasi') })
     } finally {
       setLoading(false)
     }
@@ -119,13 +124,25 @@ export default function UserAspirasi() {
 
   const handleDelete = async (id) => {
     if (!confirm('Hapus aspirasi ini?')) return
-    await api.delete(`/aspirasi/${id}`)
-    fetchData()
+    try {
+      const res = await api.delete(`/aspirasi/${id}`)
+      await fetchData()
+      setFeedback({ type: 'success', text: res.data.message || 'Aspirasi berhasil dihapus' })
+    } catch (err) {
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal menghapus aspirasi') })
+    }
   }
 
   return (
     <UserLayout>
       <div className="space-y-5">
+        {feedback && (
+          <div className={`rounded-xl px-4 py-3 text-sm border ${
+            feedback.type === 'success'
+              ? 'bg-green-50 border-green-200 text-green-700'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>{feedback.text}</div>
+        )}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-800">Aspirasi Saya</h1>
@@ -173,7 +190,7 @@ export default function UserAspirasi() {
                     >
                       Detail
                     </button>
-                    {p.status === '0' && (
+                    {p.status === 'verifikasi_lapangan' && (
                       <button
                         onClick={() => handleDelete(p.id_pengaduan)}
                         className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200"

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import api from '../services/api'
+import api, { getApiError } from '../services/api'
 
 const stats = [
   { icon: '👥', label: 'Penduduk', value: '25.282', sub: 'jiwa' },
@@ -20,10 +20,15 @@ export default function Landing() {
   const [kelurahan, setKelurahan] = useState(null)
   const [statistik, setStatistik] = useState(null)
   const [scrolled, setScrolled] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    api.get('/kelurahan').then(r => setKelurahan(r.data.data)).catch(() => {})
-    api.get('/public/statistik').then(r => setStatistik(r.data)).catch(() => {})
+    api.get('/kelurahan')
+      .then(r => setKelurahan(r.data.data))
+      .catch(err => setLoadError(getApiError(err, 'Informasi kelurahan belum dapat dimuat')))
+    api.get('/public/statistik')
+      .then(r => setStatistik(r.data))
+      .catch(err => setLoadError(getApiError(err, 'Statistik belum dapat dimuat')))
     const onScroll = () => setScrolled(window.scrollY > 40)
     window.addEventListener('scroll', onScroll)
     return () => window.removeEventListener('scroll', onScroll)
@@ -31,6 +36,11 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen bg-stone-50" style={{ fontFamily: "'Plus Jakarta Sans', 'Segoe UI', sans-serif" }}>
+      {loadError && (
+        <div className="fixed top-20 right-4 z-[60] max-w-sm rounded-xl px-4 py-3 text-sm bg-red-50 border border-red-200 text-red-700 shadow">
+          {loadError}
+        </div>
+      )}
 
       {/* Sticky Navbar */}
       <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white/95 backdrop-blur shadow-md' : 'bg-transparent'}`}>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import api from '../services/api'
+import api, { getApiError } from '../services/api'
 
 // ── Di luar komponen agar tidak re-render setiap ketik ──
 const inputCls = 'w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition bg-gray-50'
@@ -58,24 +58,32 @@ export default function Register() {
   const [step, setStep]           = useState(1)
 
   useEffect(() => {
-    api.get('/provinces').then(r => setProvinces(r.data.data || [])).catch(() => {})
+    api.get('/provinces')
+      .then(r => setProvinces(r.data.data || []))
+      .catch(err => setError(getApiError(err, 'Gagal memuat daftar provinsi')))
   }, [])
   useEffect(() => {
     if (form.province_id) {
       setRegencies([]); setDistricts([]); setVillages([])
-      api.get(`/regencies?province_id=${form.province_id}`).then(r => setRegencies(r.data.data || []))
+      api.get(`/regencies?province_id=${form.province_id}`)
+        .then(r => setRegencies(r.data.data || []))
+        .catch(err => setError(getApiError(err, 'Gagal memuat kabupaten/kota')))
     }
   }, [form.province_id])
   useEffect(() => {
     if (form.regency_id) {
       setDistricts([]); setVillages([])
-      api.get(`/districts?regency_id=${form.regency_id}`).then(r => setDistricts(r.data.data || []))
+      api.get(`/districts?regency_id=${form.regency_id}`)
+        .then(r => setDistricts(r.data.data || []))
+        .catch(err => setError(getApiError(err, 'Gagal memuat kecamatan')))
     }
   }, [form.regency_id])
   useEffect(() => {
     if (form.district_id) {
       setVillages([])
-      api.get(`/villages?district_id=${form.district_id}`).then(r => setVillages(r.data.data || []))
+      api.get(`/villages?district_id=${form.district_id}`)
+        .then(r => setVillages(r.data.data || []))
+        .catch(err => setError(getApiError(err, 'Gagal memuat kelurahan/desa')))
     }
   }, [form.district_id])
 
@@ -87,9 +95,9 @@ export default function Register() {
     setLoading(true)
     try {
       await api.post('/auth/register', form)
-      navigate('/login')
+      navigate('/login', { state: { success: 'Registrasi berhasil. Silakan login.' } })
     } catch (err) {
-      setError(err.response?.data?.error || 'Registrasi gagal, coba lagi')
+      setError(getApiError(err, 'Registrasi gagal, coba lagi'))
       setStep(1)
     } finally {
       setLoading(false)

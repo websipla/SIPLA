@@ -88884,12 +88884,12 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO "pengaduan" ("id_pengaduan", "tgl_pengaduan", "nik", "tipe_aspirasi", "judul_laporan", "isi_laporan", "tgl_kejadian", "lokasi_kejadian", "latitude", "longitude", "foto", "status", "created_at", "updated_at") VALUES
 (1, '2024-01-05 10:31:05', '3275072410980072', NULL, 'Pencurian LCD TV', 'Mohon Tindak Lanjuti', '2024-01-05 00:00:00', 'Rumah bapak xxx', NULL, NULL, 'assets/pengaduan/6hSihceaLSv5Pz1VUWyOCkd2PlRfxwemaQ7HPHob.jpg', 'selesai', '2024-01-05 15:31:05', '2024-01-05 08:38:56'),
-(2, '2026-05-02 09:22:51', '3275072410980072', NULL, 'jalan bolong', 'jalan rusak parah', '2026-05-02 07:00:00', 'eyang agung', -6.31308585, 106.72997857, 'assets/pengaduan/1777688571380514800.png', '0', '2026-05-02 02:22:51', '2026-05-02 02:22:51'),
-(3, '2026-06-18 11:57:54', '3275072410980072', 'Ketentraman & Ketertiban Umum', 'gangguan kenyamanan', 'tolong pak/bu mohom ditertibkan anak anak yang suka nongkrong sampai subuh', '2026-06-18 07:00:00', 'jl serua indah no 10', -6.31314179, 106.72290802, 'assets/pengaduan/1781758674446812400.jpg', '', '2026-06-18 04:57:54', '2026-06-18 05:47:11')
+(2, '2026-05-02 09:22:51', '3275072410980072', NULL, 'jalan bolong', 'jalan rusak parah', '2026-05-02 07:00:00', 'eyang agung', -6.31308585, 106.72997857, 'assets/pengaduan/1777688571380514800.png', 'verifikasi_lapangan', '2026-05-02 02:22:51', '2026-05-02 02:22:51'),
+(3, '2026-06-18 11:57:54', '3275072410980072', 'Ketentraman & Ketertiban Umum', 'gangguan kenyamanan', 'tolong pak/bu mohom ditertibkan anak anak yang suka nongkrong sampai subuh', '2026-06-18 07:00:00', 'jl serua indah no 10', -6.31314179, 106.72290802, 'assets/pengaduan/1781758674446812400.jpg', 'proses_penyelesaian', '2026-06-18 04:57:54', '2026-06-18 05:47:11')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "permohonan" ("id", "nik", "id_jenis_layanan", "tgl_permohonan", "keterangan", "file_ktp", "file_kk", "file_pendukung", "status", "catatan_petugas", "file_hasil", "id_petugas", "tgl_selesai", "created_at", "updated_at") VALUES
-(1, '3275072410980072', 1, '2026-05-02 08:49:24', '', 'assets/permohonan/ktp/1777686564534962900.png', 'assets/permohonan/kk/1777686564536573200.png', 'assets/permohonan/pendukung/1777686564537962900.png', 'menunggu', '', '', NULL, NULL, '2026-05-02 01:49:24', '2026-05-02 01:49:24')
+(1, '3275072410980072', 1, '2026-05-02 08:49:24', '', 'assets/permohonan/ktp/1777686564534962900.png', 'assets/permohonan/kk/1777686564536573200.png', 'assets/permohonan/pendukung/1777686564537962900.png', 'verifikasi_persyaratan', '', '', NULL, NULL, '2026-05-02 01:49:24', '2026-05-02 01:49:24')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "tanggapan" ("id_tanggapan", "id_pengaduan", "tgl_tanggapan", "tanggapan", "file_bukti", "id_petugas", "created_at", "updated_at", "file_bukti_2", "file_bukti_3") VALUES

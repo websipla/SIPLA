@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import api, { getAssetUrl } from '../../services/api'
+import api, { getApiError, getAssetUrl } from '../../services/api'
 import AdminLayout from '../../components/AdminLayout'
 import { useAuth } from '../../context/AuthContext'
 
@@ -81,6 +81,7 @@ export default function AdminAspirasi() {
   const [filterDari, setFilterDari] = useState('')
   const [filterSampai, setFilterSampai] = useState('')
   const [loading, setLoading]       = useState(false)
+  const [feedback, setFeedback]     = useState(null)
 
   const fetchData = () => {
     const params = new URLSearchParams()
@@ -88,7 +89,9 @@ export default function AdminAspirasi() {
     if (filterDari)    params.append('dari', filterDari)
     if (filterSampai)  params.append('sampai', filterSampai)
     const q = params.toString() ? `?${params.toString()}` : ''
-    api.get(`/aspirasi${q}`).then(r => setList(r.data.data || []))
+    return api.get(`/aspirasi${q}`)
+      .then(r => setList(r.data.data || []))
+      .catch(err => setFeedback({ type: 'error', text: getApiError(err, 'Gagal memuat aspirasi') }))
   }
 
   useEffect(() => { fetchData() }, [filterStatus, filterDari, filterSampai])
@@ -108,11 +111,16 @@ export default function AdminAspirasi() {
   }
 
   const openDetail = async (p) => {
-    const res = await api.get(`/aspirasi/${p.id_pengaduan}`)
-    setSelected(res.data.data)
-    setNewStatus(res.data.data.status)
-    setTanggapan('')
-    setFileBukti([null, null, null])
+    setFeedback(null)
+    try {
+      const res = await api.get(`/aspirasi/${p.id_pengaduan}`)
+      setSelected(res.data.data)
+      setNewStatus(res.data.data.status)
+      setTanggapan('')
+      setFileBukti([null, null, null])
+    } catch (err) {
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal memuat detail aspirasi') })
+    }
   }
 
   const handleSetBukti = (idx, file) => {
@@ -128,11 +136,12 @@ export default function AdminAspirasi() {
       fd.append('tanggapan', tanggapan)
       fd.append('status', newStatus)
       fileBukti.forEach((f, i) => { if (f) fd.append(`file_bukti_${i+1}`, f) })
-      await api.post('/tanggapan', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      fetchData()
+      const res = await api.post('/tanggapan', fd)
+      await fetchData()
       setSelected(null)
+      setFeedback({ type: 'success', text: res.data.message || 'Tanggapan berhasil disimpan' })
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal kirim tanggapan')
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal mengirim tanggapan') })
     } finally {
       setLoading(false)
     }
@@ -146,9 +155,10 @@ export default function AdminAspirasi() {
       } else {
         await api.delete(`/aspirasi/${p.id_pengaduan}`)
       }
-      fetchData()
+      await fetchData()
+      setFeedback({ type: 'success', text: 'Aspirasi berhasil dihapus' })
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal menghapus aspirasi')
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal menghapus aspirasi') })
     }
   }
 
@@ -229,6 +239,13 @@ export default function AdminAspirasi() {
   return (
     <AdminLayout>
       <div className="space-y-5">
+        {feedback && (
+          <div className={`rounded-xl px-4 py-3 text-sm border ${
+            feedback.type === 'success'
+              ? 'bg-green-50 border-green-200 text-green-700'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>{feedback.text}</div>
+        )}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold text-gray-800">Aspirasi Masyarakat</h1>

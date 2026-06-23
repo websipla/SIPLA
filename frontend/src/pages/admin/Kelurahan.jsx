@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import api from '../../services/api'
+import api, { getApiError } from '../../services/api'
 import AdminLayout from '../../components/AdminLayout'
 
 const inputCls = 'w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition bg-gray-50'
@@ -36,7 +36,7 @@ export default function AdminKelurahan() {
     api.get('/kelurahan').then(r => {
       setInfo(r.data.data)
       setForm(r.data.data)
-    })
+    }).catch(err => setMsg({ type: 'error', text: getApiError(err, 'Gagal memuat data kelurahan') }))
   }, [])
 
   const handleSave = async (e) => {
@@ -44,12 +44,13 @@ export default function AdminKelurahan() {
     setLoading(true)
     setMsg(null)
     try {
-      await api.put('/kelurahan', form)
-      setInfo({ ...form })
+      const res = await api.put('/kelurahan', form)
+      setInfo(res.data.data)
+      setForm(res.data.data)
       setEdit(false)
-      setMsg({ type: 'success', text: 'Data kelurahan berhasil diperbarui' })
+      setMsg({ type: 'success', text: res.data.message || 'Data kelurahan berhasil diperbarui' })
     } catch (err) {
-      setMsg({ type: 'error', text: err.response?.data?.error || 'Gagal menyimpan' })
+      setMsg({ type: 'error', text: getApiError(err, 'Gagal menyimpan data kelurahan') })
     } finally {
       setLoading(false)
     }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import api, { getAssetUrl } from '../../services/api'
+import api, { getApiError, getAssetUrl } from '../../services/api'
 import AdminLayout from '../../components/AdminLayout'
 import { useAuth } from '../../context/AuthContext'
 
@@ -81,6 +81,7 @@ export default function AdminPermohonan() {
   const [filterDari, setFilterDari]     = useState('')
   const [filterSampai, setFilterSampai] = useState('')
   const [loading, setLoading]   = useState(false)
+  const [feedback, setFeedback] = useState(null)
 
   const handleDelete = async (p) => {
     if (!confirm(`Hapus permohonan "${p.jenis_layanan?.nama_layanan}" dari ${p.masyarakat?.name}? Tindakan ini tidak dapat dibatalkan.`)) return
@@ -90,9 +91,10 @@ export default function AdminPermohonan() {
       } else {
         await api.delete(`/permohonan/${p.id}`)
       }
-      fetchData()
+      await fetchData()
+      setFeedback({ type: 'success', text: 'Permohonan berhasil dihapus' })
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal menghapus permohonan')
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal menghapus permohonan') })
     }
   }
 
@@ -100,7 +102,9 @@ export default function AdminPermohonan() {
     const params = new URLSearchParams()
     if (filterStatus) params.append('status', filterStatus)
     const q = params.toString() ? `?${params.toString()}` : ''
-    api.get(`/permohonan${q}`).then(r => setList(r.data.data || []))
+    return api.get(`/permohonan${q}`)
+      .then(r => setList(r.data.data || []))
+      .catch(err => setFeedback({ type: 'error', text: getApiError(err, 'Gagal memuat permohonan') }))
   }
   useEffect(() => { fetchData() }, [filterStatus])
 
@@ -119,9 +123,14 @@ export default function AdminPermohonan() {
   }
 
   const openDetail = async (p) => {
-    const res = await api.get(`/permohonan/${p.id}`)
-    setSelected(res.data.data)
-    setForm({ status: res.data.data.status, catatan_petugas: '', file_hasil: null })
+    setFeedback(null)
+    try {
+      const res = await api.get(`/permohonan/${p.id}`)
+      setSelected(res.data.data)
+      setForm({ status: res.data.data.status, catatan_petugas: '', file_hasil: null })
+    } catch (err) {
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal memuat detail permohonan') })
+    }
   }
 
   const handleProses = async () => {
@@ -131,11 +140,12 @@ export default function AdminPermohonan() {
       fd.append('status', form.status)
       fd.append('catatan_petugas', form.catatan_petugas)
       if (form.file_hasil) fd.append('file_hasil', form.file_hasil)
-      await api.put(`/permohonan/${selected.id}/proses`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      fetchData()
+      const res = await api.put(`/permohonan/${selected.id}/proses`, fd)
+      await fetchData()
       setSelected(null)
+      setFeedback({ type: 'success', text: res.data.message || 'Permohonan berhasil diperbarui' })
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal memproses')
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal memproses permohonan') })
     } finally {
       setLoading(false)
     }
@@ -212,6 +222,13 @@ export default function AdminPermohonan() {
   return (
     <AdminLayout>
       <div className="space-y-5">
+        {feedback && (
+          <div className={`rounded-xl px-4 py-3 text-sm border ${
+            feedback.type === 'success'
+              ? 'bg-green-50 border-green-200 text-green-700'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>{feedback.text}</div>
+        )}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold text-gray-800">Permohonan Layanan</h1>

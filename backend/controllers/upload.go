@@ -35,3 +35,16 @@ func respondUploadError(c *gin.Context, fieldName string, err error) {
 		"error": "File " + fieldName + " tidak valid: " + err.Error(),
 	})
 }
+
+func requireFormFile(c *gin.Context, fieldName, label string) bool {
+	_, err := c.FormFile(fieldName)
+	if errors.Is(err, http.ErrMissingFile) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": label + " wajib diunggah"})
+		return false
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Gagal membaca " + label + ": " + err.Error()})
+		return false
+	}
+	return true
+}

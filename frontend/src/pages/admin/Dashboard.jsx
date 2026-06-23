@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polygon, Popup, Marker, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-import api from '../../services/api'
+import api, { getApiError } from '../../services/api'
 import AdminLayout from '../../components/AdminLayout'
 
 delete L.Icon.Default.prototype._getIconUrl
@@ -89,28 +89,38 @@ export default function AdminDashboard() {
   const [showPass, setShowPass]           = useState(false)
   const [resetMsg, setResetMsg]           = useState(null)
   const [resetLoading, setResetLoading]   = useState(false)
+  const [feedback, setFeedback]           = useState(null)
 
-  const fetchAll = () => {
-    api.get('/dashboard').then(r => setStats(r.data))
-    api.get('/kelurahan').then(r => setKelurahan(r.data.data))
-    api.get('/aspirasi').then(r => setAspirasi(
-      (r.data.data || []).filter(a =>
-        a.latitude && a.longitude &&
-        a.status !== 'selesai' && a.status !== 'ditolak'
-      )
-    ))
-    fetchNotif()
+  const fetchAll = async () => {
+    try {
+      const [dashboardRes, kelurahanRes, aspirasiRes] = await Promise.all([
+        api.get('/dashboard'),
+        api.get('/kelurahan'),
+        api.get('/aspirasi'),
+      ])
+      setStats(dashboardRes.data)
+      setKelurahan(kelurahanRes.data.data)
+      setAspirasi((aspirasiRes.data.data || []).filter(a =>
+        a.latitude && a.longitude && a.status !== 'selesai' && a.status !== 'ditolak'
+      ))
+      await fetchNotif()
+    } catch (err) {
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal memuat dashboard') })
+    }
   }
 
-  const fetchNotif = () => {
-    api.get('/lupa-password?status=menunggu').then(r => setNotifList(r.data.data || []))
-  }
+  const fetchNotif = () => api.get('/lupa-password?status=menunggu')
+    .then(r => setNotifList(r.data.data || []))
 
   useEffect(() => { fetchAll() }, [])
 
-  const handleBaca = (id) => {
-    api.put(`/lupa-password/${id}/baca`)
-    setNotifList(prev => prev.map(n => n.id === id ? { ...n, dibaca: true } : n))
+  const handleBaca = async (id) => {
+    try {
+      await api.put(`/lupa-password/${id}/baca`)
+      setNotifList(prev => prev.map(n => n.id === id ? { ...n, dibaca: true } : n))
+    } catch (err) {
+      setFeedback({ type: 'error', text: getApiError(err, 'Gagal menandai notifikasi') })
+    }
   }
 
   const openResetModal = (notif) => {
@@ -137,7 +147,7 @@ export default function AdminDashboard() {
       fetchNotif()
       setTimeout(() => setResetModal(null), 2000)
     } catch (err) {
-      setResetMsg({ type: 'error', text: err.response?.data?.error || 'Gagal mereset password' })
+      setResetMsg({ type: 'error', text: getApiError(err, 'Gagal mereset password') })
     } finally {
       setResetLoading(false)
     }
@@ -168,6 +178,13 @@ export default function AdminDashboard() {
   return (
     <AdminLayout>
       <div className="space-y-6">
+        {feedback && (
+          <div className={`rounded-xl px-4 py-3 text-sm border ${
+            feedback.type === 'success'
+              ? 'bg-green-50 border-green-200 text-green-700'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>{feedback.text}</div>
+        )}
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
           <p className="text-gray-500 text-sm">Kelurahan Serua Indah — Kecamatan Ciputat</p>

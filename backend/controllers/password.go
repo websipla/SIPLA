@@ -1,12 +1,14 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 
+	"gorm.io/gorm"
 	"pengaduan/config"
 	"pengaduan/models"
 )
@@ -24,10 +26,16 @@ func AjukanLupaPassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "NIK dan no. HP wajib diisi"})
 		return
 	}
+	req.NIK = trim(req.NIK)
+	req.NoHP = trim(req.NoHP)
 
 	// Verifikasi NIK + no HP cocok di database
 	var user models.Masyarakat
 	if err := config.DB.Where("nik = ?", req.NIK).First(&user).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			respondDBError(c, "password_reset_user_lookup", err)
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "NIK tidak ditemukan"})
 		return
 	}
@@ -38,8 +46,13 @@ func AjukanLupaPassword(c *gin.Context) {
 
 	// Cek apakah sudah ada permintaan yang masih menunggu
 	var existing models.PermintaanResetPassword
-	if err := config.DB.Where("nik = ? AND status = 'menunggu'", req.NIK).First(&existing).Error; err == nil {
+	err := config.DB.Where("nik = ? AND status = 'menunggu'", req.NIK).First(&existing).Error
+	if err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Permintaan reset password Anda sedang menunggu diproses oleh petugas"})
+		return
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		respondDBError(c, "password_reset_duplicate_check", err)
 		return
 	}
 
@@ -54,9 +67,10 @@ func AjukanLupaPassword(c *gin.Context) {
 	}
 
 	if err := config.DB.Create(&permintaan).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengirim permintaan"})
+		respondDBError(c, "password_reset_request_create", err)
 		return
 	}
+	logAction(c, "password_reset_request_success", "nik", maskIdentifier(req.NIK))
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Permintaan berhasil dikirim. Petugas akan segera memproses dan menghubungi Anda.",
@@ -75,16 +89,22 @@ func GetPermintaanReset(c *gin.Context) {
 	if status := c.Query("status"); status != "" {
 		query = query.Where("status = ?", status)
 	}
-	query.Find(&list)
+	if err := query.Find(&list).Error; err != nil {
+		respondDBError(c, "password_reset_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
 // GET /api/admin/lupa-password/count — jumlah notif belum dibaca
 func GetJumlahNotifReset(c *gin.Context) {
 	var count int64
-	config.DB.Model(&models.PermintaanResetPassword{}).
+	if err := config.DB.Model(&models.PermintaanResetPassword{}).
 		Where("status = ? AND dibaca = ?", "menunggu", false).
-		Count(&count)
+		Count(&count).Error; err != nil {
+		respondDBError(c, "password_reset_count", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"count": count})
 }
 
@@ -92,9 +112,17 @@ func GetJumlahNotifReset(c *gin.Context) {
 func TandaiBaca(c *gin.Context) {
 	id := c.Param("id")
 	now := time.Now()
-	config.DB.Model(&models.PermintaanResetPassword{}).
+	result := config.DB.Model(&models.PermintaanResetPassword{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{"dibaca": true, "updated_at": now})
+	if result.Error != nil {
+		respondDBError(c, "password_reset_mark_read", result.Error)
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Permintaan tidak ditemukan"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "OK"})
 }
 
@@ -133,29 +161,33 @@ func SelesaikanPermintaanReset(c *gin.Context) {
 		return
 	}
 
-	// Update password masyarakat
 	now := time.Now()
-	if err := config.DB.Model(&models.Masyarakat{}).
-		Where("nik = ?", permintaan.NIK).
-		Updates(map[string]interface{}{
-			"password":   string(hashed),
-			"updated_at": now,
-		}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mereset password"})
+	err = config.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.Masyarakat{}).
+			Where("nik = ?", permintaan.NIK).
+			Updates(map[string]interface{}{"password": string(hashed), "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Model(&permintaan).Updates(map[string]interface{}{
+			"status": "selesai", "dibaca": true, "catatan": trim(req.Catatan), "updated_at": now,
+		}).Error
+	})
+	if err != nil {
+		respondDBError(c, "password_reset_finish_transaction", err)
 		return
 	}
 
-	// Tandai permintaan selesai
-	config.DB.Model(&permintaan).Updates(map[string]interface{}{
-		"status":     "selesai",
-		"dibaca":     true,
-		"catatan":    req.Catatan,
-		"updated_at": now,
-	})
-
 	// Ambil nama masyarakat untuk response
 	var user models.Masyarakat
-	config.DB.Where("nik = ?", permintaan.NIK).First(&user)
+	if err := config.DB.Where("nik = ?", permintaan.NIK).First(&user).Error; err != nil {
+		respondDBError(c, "password_reset_reload_user", err)
+		return
+	}
+	logAction(c, "password_reset_finish_success", "request_id", permintaan.ID, "nik", maskIdentifier(permintaan.NIK))
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Password berhasil direset untuk " + user.Name,
@@ -167,14 +199,20 @@ func SelesaikanPermintaanReset(c *gin.Context) {
 // GET /api/admin/masyarakat
 func GetMasyarakat(c *gin.Context) {
 	var list []models.Masyarakat
-	config.DB.Find(&list)
+	if err := config.DB.Order("created_at DESC").Find(&list).Error; err != nil {
+		respondDBError(c, "masyarakat_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
 // GET /api/admin/petugas
 func GetPetugas(c *gin.Context) {
 	var list []models.Petugas
-	config.DB.Find(&list)
+	if err := config.DB.Order("created_at DESC").Find(&list).Error; err != nil {
+		respondDBError(c, "petugas_list", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
@@ -199,7 +237,10 @@ func ResetPasswordMasyarakat(c *gin.Context) {
 	}
 	hashed, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	now := time.Now()
-	config.DB.Model(&user).Updates(map[string]interface{}{"password": string(hashed), "updated_at": now})
+	if err := config.DB.Model(&user).Updates(map[string]interface{}{"password": string(hashed), "updated_at": now}).Error; err != nil {
+		respondDBError(c, "masyarakat_password_reset", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "Password berhasil direset untuk " + user.Name})
 }
 
@@ -229,7 +270,10 @@ func ResetPasswordPetugas(c *gin.Context) {
 	}
 	hashed, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	now := time.Now()
-	config.DB.Model(&petugas).Updates(map[string]interface{}{"password": string(hashed), "updated_at": now})
+	if err := config.DB.Model(&petugas).Updates(map[string]interface{}{"password": string(hashed), "updated_at": now}).Error; err != nil {
+		respondDBError(c, "petugas_password_reset", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "Password berhasil direset untuk " + petugas.NamaPetugas})
 }
 
@@ -261,7 +305,10 @@ func ChangePassword(c *gin.Context) {
 			return
 		}
 		hashed, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-		config.DB.Model(&user).Updates(map[string]interface{}{"password": string(hashed), "updated_at": now})
+		if err := config.DB.Model(&user).Updates(map[string]interface{}{"password": string(hashed), "updated_at": now}).Error; err != nil {
+			respondDBError(c, "masyarakat_password_change", err)
+			return
+		}
 	} else {
 		var petugas models.Petugas
 		if err := config.DB.Where("id_petugas = ?", userID).First(&petugas).Error; err != nil {
@@ -273,7 +320,10 @@ func ChangePassword(c *gin.Context) {
 			return
 		}
 		hashed, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-		config.DB.Model(&petugas).Updates(map[string]interface{}{"password": string(hashed), "updated_at": now})
+		if err := config.DB.Model(&petugas).Updates(map[string]interface{}{"password": string(hashed), "updated_at": now}).Error; err != nil {
+			respondDBError(c, "petugas_password_change", err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Password berhasil diubah"})
 }
@@ -288,7 +338,14 @@ func CreatePetugas(c *gin.Context) {
 		Roles       string `json:"roles"        binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nama, username, password, dan role wajib diisi"})
+		return
+	}
+	req.NamaPetugas = trim(req.NamaPetugas)
+	req.Username = trim(req.Username)
+	req.Telp = trim(req.Telp)
+	if req.NamaPetugas == "" || req.Username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nama dan username tidak boleh kosong"})
 		return
 	}
 	if req.Roles != "admin" && req.Roles != "petugas" {
@@ -304,6 +361,9 @@ func CreatePetugas(c *gin.Context) {
 	var existing models.Petugas
 	if err := config.DB.Where("username = ?", req.Username).First(&existing).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Username sudah digunakan"})
+		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		respondDBError(c, "petugas_duplicate_check", err)
 		return
 	}
 
@@ -324,9 +384,10 @@ func CreatePetugas(c *gin.Context) {
 		UpdatedAt:   &now,
 	}
 	if err := config.DB.Create(&p).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menambah petugas"})
+		respondDBError(c, "petugas_create", err)
 		return
 	}
+	logAction(c, "petugas_create_success", "id", p.IDPetugas, "username", p.Username, "role", p.Roles)
 	c.JSON(http.StatusCreated, gin.H{"message": "Petugas berhasil ditambahkan", "data": p})
 }
 
@@ -345,7 +406,11 @@ func DeletePetugas(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Tidak dapat menghapus akun sendiri"})
 		return
 	}
-	config.DB.Delete(&p)
+	if err := config.DB.Delete(&p).Error; err != nil {
+		respondDBError(c, "petugas_delete", err)
+		return
+	}
+	logAction(c, "petugas_delete_success", "id", p.IDPetugas)
 	c.JSON(http.StatusOK, gin.H{"message": "Petugas berhasil dihapus"})
 }
 
@@ -358,8 +423,11 @@ func AdminDeleteAspirasi(c *gin.Context) {
 		return
 	}
 	// Hapus juga tanggapan terkait
-	config.DB.Where("id_pengaduan = ?", id).Delete(&models.Tanggapan{})
-	config.DB.Delete(&p)
+	if err := config.DB.Delete(&p).Error; err != nil {
+		respondDBError(c, "admin_aspirasi_delete", err)
+		return
+	}
+	logAction(c, "admin_aspirasi_delete_success", "id", p.IDPengaduan)
 	c.JSON(http.StatusOK, gin.H{"message": "Aspirasi berhasil dihapus"})
 }
 
@@ -371,6 +439,10 @@ func AdminDeletePermohonan(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Permohonan tidak ditemukan"})
 		return
 	}
-	config.DB.Delete(&p)
+	if err := config.DB.Delete(&p).Error; err != nil {
+		respondDBError(c, "admin_permohonan_delete", err)
+		return
+	}
+	logAction(c, "admin_permohonan_delete_success", "id", p.ID)
 	c.JSON(http.StatusOK, gin.H{"message": "Permohonan berhasil dihapus"})
 }
