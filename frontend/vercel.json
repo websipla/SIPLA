@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://sipla-production.up.railway.app/api/:path*"
+    },
+    {
+      "source": "/assets/:path*",
+      "destination": "https://sipla-production.up.railway.app/assets/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
