@@ -53,12 +53,21 @@ func InitDB() error {
 	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 
 	DB = db
-	if err := autoMigrate(); err != nil {
-		return err
+	if autoMigrateEnabled() {
+		if err := autoMigrate(); err != nil {
+			return err
+		}
+		log.Println("Database PostgreSQL connected; AutoMigrate completed")
+	} else {
+		log.Println("Database PostgreSQL connected; AutoMigrate disabled")
 	}
 
-	log.Println("Database PostgreSQL connected and migrated successfully")
 	return nil
+}
+
+func autoMigrateEnabled() bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("AUTO_MIGRATE")))
+	return value == "true" || value == "1" || value == "yes"
 }
 
 func autoMigrate() error {
@@ -84,34 +93,34 @@ func autoMigrate() error {
 
 func createPostgresConstraints() error {
 	constraints := []string{
-		`ALTER TABLE regencies ADD CONSTRAINT fk_regencies_province
+		`ALTER TABLE regencies ADD CONSTRAINT regencies_province_id_foreign
 			FOREIGN KEY (province_id) REFERENCES provinces(id)
 			ON UPDATE CASCADE ON DELETE RESTRICT`,
-		`ALTER TABLE districts ADD CONSTRAINT fk_districts_regency
+		`ALTER TABLE districts ADD CONSTRAINT districts_regency_id_foreign
 			FOREIGN KEY (regency_id) REFERENCES regencies(id)
 			ON UPDATE CASCADE ON DELETE RESTRICT`,
-		`ALTER TABLE villages ADD CONSTRAINT fk_villages_district
+		`ALTER TABLE villages ADD CONSTRAINT villages_district_id_foreign
 			FOREIGN KEY (district_id) REFERENCES districts(id)
 			ON UPDATE CASCADE ON DELETE RESTRICT`,
-		`ALTER TABLE pengaduan ADD CONSTRAINT fk_pengaduan_masyarakat
+		`ALTER TABLE pengaduan ADD CONSTRAINT pengaduan_nik_foreign
 			FOREIGN KEY (nik) REFERENCES masyarakat(nik)
 			ON UPDATE CASCADE ON DELETE CASCADE`,
-		`ALTER TABLE tanggapan ADD CONSTRAINT fk_tanggapan_pengaduan
+		`ALTER TABLE tanggapan ADD CONSTRAINT tanggapan_id_pengaduan_foreign
 			FOREIGN KEY (id_pengaduan) REFERENCES pengaduan(id_pengaduan)
 			ON UPDATE CASCADE ON DELETE CASCADE`,
-		`ALTER TABLE tanggapan ADD CONSTRAINT fk_tanggapan_petugas
+		`ALTER TABLE tanggapan ADD CONSTRAINT tanggapan_id_petugas_foreign
 			FOREIGN KEY (id_petugas) REFERENCES petugas(id_petugas)
 			ON UPDATE CASCADE ON DELETE CASCADE`,
-		`ALTER TABLE permohonan ADD CONSTRAINT fk_permohonan_masyarakat
+		`ALTER TABLE permohonan ADD CONSTRAINT permohonan_nik_foreign
 			FOREIGN KEY (nik) REFERENCES masyarakat(nik)
 			ON UPDATE CASCADE ON DELETE CASCADE`,
-		`ALTER TABLE permohonan ADD CONSTRAINT fk_permohonan_jenis_layanan
+		`ALTER TABLE permohonan ADD CONSTRAINT permohonan_jenis_foreign
 			FOREIGN KEY (id_jenis_layanan) REFERENCES jenis_layanan(id)
 			ON UPDATE CASCADE ON DELETE RESTRICT`,
-		`ALTER TABLE permohonan ADD CONSTRAINT fk_permohonan_petugas
+		`ALTER TABLE permohonan ADD CONSTRAINT permohonan_petugas_foreign
 			FOREIGN KEY (id_petugas) REFERENCES petugas(id_petugas)
 			ON UPDATE CASCADE ON DELETE SET NULL`,
-		`ALTER TABLE permintaan_reset_password ADD CONSTRAINT fk_reset_masyarakat
+		`ALTER TABLE permintaan_reset_password ADD CONSTRAINT permintaan_reset_password_nik_foreign
 			FOREIGN KEY (nik) REFERENCES masyarakat(nik)
 			ON UPDATE CASCADE ON DELETE CASCADE`,
 	}

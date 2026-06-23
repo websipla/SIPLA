@@ -15,7 +15,8 @@ Backend:
 ```bash
 cd backend
 cp .env.example .env
-# Isi DATABASE_URL dan JWT_SECRET
+# Isi DATABASE_URL dan JWT_SECRET. Biarkan AUTO_MIGRATE=false
+# jika schema.sql sudah diimpor.
 go mod tidy
 go run .
 ```
@@ -44,6 +45,7 @@ DATABASE_URL=
 JWT_SECRET=
 PORT=8080
 FRONTEND_URL=http://localhost:5173
+AUTO_MIGRATE=false
 ```
 
 Frontend:
@@ -52,4 +54,4 @@ Frontend:
 VITE_API_URL=http://localhost:8080/api
 ```
 
-`DATABASE_URL` dan `JWT_SECRET` wajib; backend akan menolak start jika salah satunya kosong.
+`DATABASE_URL` dan `JWT_SECRET` wajib; backend akan menolak start jika salah satunya kosong. Panduan import dump MySQL ke Supabase ada di [DEPLOYMENT.md](DEPLOYMENT.md).

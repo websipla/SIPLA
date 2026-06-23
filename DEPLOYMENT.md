@@ -3,7 +3,7 @@
 ## 1. Siapkan Supabase PostgreSQL
 
 1. Buat project di Supabase dan simpan database password dengan aman.
-2. Buka project dashboard, lalu klik **Connect**.
+2. Buka project dashboard, klik **Connect**, lalu pilih connection string URI.
 3. Untuk backend container/VM yang hidup lama, gunakan **Direct connection** bila host mendukung IPv6. Jika host hanya IPv4, gunakan **Session pooler** port `5432`.
 4. Untuk platform serverless dengan koneksi singkat, gunakan **Transaction pooler** port `6543`. Backend sudah memakai `PreferSimpleProtocol`, sehingga prepared statement dimatikan dan kompatibel dengan transaction pooler.
 5. Salin URI lengkap ke `DATABASE_URL` dan tambahkan `sslmode=require` jika belum ada.
@@ -14,29 +14,48 @@ Contoh:
 DATABASE_URL=postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres?sslmode=require
 ```
 
-Jangan commit URI atau password ke Git. Referensi resmi: [Supabase database connections](https://supabase.com/docs/guides/database/connecting-to-postgres).
+Ganti placeholder password dengan database password project. Jika password berisi karakter khusus, gunakan versi URL-encoded. Jangan commit URI atau password ke Git. Referensi resmi: [Supabase database connections](https://supabase.com/docs/guides/database/connecting-to-postgres).
 
-Saat backend pertama kali berjalan, GORM `AutoMigrate` membuat atau menambahkan tabel/kolom aplikasi. `AutoMigrate` tidak menghapus kolom lama.
+### Import schema dan data hasil konversi
 
-### Memindahkan data MySQL lama
+File hasil migrasi:
 
-Jika hanya membutuhkan instalasi baru, jalankan backend terhadap database Supabase kosong dan biarkan `AutoMigrate` membuat skema.
+- `supabase/schema.sql`: schema PostgreSQL, primary key, foreign key, index, identity, dan kolom aplikasi terbaru.
+- `supabase/seed.sql`: seluruh data dari `pengaduan_masyarakat3.sql`, termasuk data wilayah.
 
-Jika data MySQL lama harus dipertahankan, gunakan `pgloader` ke **Session pooler** Supabase, bukan transaction pooler:
+Untuk project Supabase baru:
 
-```bash
-pgloader \
-  mysql://MYSQL_USER:MYSQL_PASSWORD@MYSQL_HOST:3306/pengaduan_masyarakat3 \
-  postgresql://postgres.PROJECT_REF:SUPABASE_PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres?sslmode=require
+1. Buka **SQL Editor** di dashboard Supabase.
+2. Buat query baru, salin seluruh isi `supabase/schema.sql`, lalu klik **Run**.
+3. Pastikan query schema selesai tanpa error.
+4. Buat query baru, salin seluruh isi `supabase/seed.sql`, lalu klik **Run**. File ini sekitar 3,5 MB karena berisi data wilayah, sehingga prosesnya dapat memerlukan beberapa saat.
+5. Jalankan query pemeriksaan berikut:
+
+```sql
+SELECT 'provinces' AS tabel, count(*) FROM provinces
+UNION ALL SELECT 'regencies', count(*) FROM regencies
+UNION ALL SELECT 'districts', count(*) FROM districts
+UNION ALL SELECT 'villages', count(*) FROM villages
+UNION ALL SELECT 'masyarakat', count(*) FROM masyarakat
+UNION ALL SELECT 'pengaduan', count(*) FROM pengaduan;
 ```
 
-Setelah import selesai:
+Dump lama mengandung beberapa blok wilayah berulang. Generator membuang duplikat berdasarkan primary key. Hasil akhirnya: 34 provinsi, 514 kabupaten/kota, 7.215 kecamatan, 80.534 desa/kelurahan, 1 masyarakat, 2 petugas, 3 pengaduan, 1 permohonan, dan 2 tanggapan.
 
-1. Jalankan `supabase/post_import.sql` di Supabase SQL Editor agar kolom Laravel lama tidak memblokir registrasi pengguna baru.
-2. Jalankan backend sekali agar `AutoMigrate` menambahkan kolom dan constraint terbaru.
-3. Periksa data enum MySQL yang dikonversi. Model aplikasi sekarang menyimpan status dan role sebagai `varchar`, sehingga status workflow baru tetap dapat dipakai.
+Jika SQL Editor kesulitan menangani `seed.sql`, gunakan `psql` dengan direct connection atau session pooler:
 
-Panduan resmi: [Migrate from MySQL to Supabase](https://supabase.com/docs/guides/platform/migrating-to-supabase/mysql) dan [Import data with pgloader](https://supabase.com/docs/guides/database/import-data).
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/schema.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/seed.sql
+```
+
+`seed.sql` melakukan `TRUNCATE ... CASCADE` sebelum insert. Jalankan hanya pada database target yang memang boleh diganti datanya.
+
+Jika dump MySQL diperbarui, generate ulang data PostgreSQL dengan:
+
+```bash
+node supabase/convert_mysql_dump.mjs
+```
 
 ## 2. Environment backend
 
@@ -47,6 +66,7 @@ DATABASE_URL=
 JWT_SECRET=
 PORT=8080
 FRONTEND_URL=http://localhost:5173
+AUTO_MIGRATE=false
 APP_ENV=development
 UPLOAD_DIR=./assets
 ```
@@ -55,6 +75,7 @@ UPLOAD_DIR=./assets
 - `JWT_SECRET` wajib. Gunakan nilai acak panjang, misalnya hasil `openssl rand -base64 48`.
 - `PORT` opsional; default `8080`.
 - `FRONTEND_URL` adalah origin frontend tanpa trailing slash. Beberapa origin dapat dipisahkan koma.
+- `AUTO_MIGRATE=false` direkomendasikan setelah `schema.sql` diimpor. Set `true` hanya untuk development atau ketika sengaja meminta GORM menambah schema.
 - `APP_ENV=production` menonaktifkan origin localhost pada CORS.
 - `UPLOAD_DIR` opsional; default `./assets`.
 
@@ -99,6 +120,7 @@ docker run --rm -p 8080:8080 \
   -e JWT_SECRET='...' \
   -e PORT=8080 \
   -e FRONTEND_URL='https://app.example.com' \
+  -e AUTO_MIGRATE=false \
   -e APP_ENV=production \
   -v sipla-assets:/app/assets \
   sipla-api
@@ -141,6 +163,7 @@ Setelah URL frontend final tersedia, isi URL tersebut ke `FRONTEND_URL` backend 
 
 - `DATABASE_URL` Supabase terisi dan tidak tersimpan di Git.
 - `JWT_SECRET` acak dan berbeda dari development.
+- `AUTO_MIGRATE=false` setelah schema production selesai diimpor.
 - `APP_ENV=production`.
 - `FRONTEND_URL` cocok persis dengan origin frontend.
 - `VITE_API_URL` menunjuk ke backend dan berakhir `/api`.
