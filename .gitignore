@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+
+backend/assets/
+frontend/dist/
+
+*.exe
+*.test
+*.out
